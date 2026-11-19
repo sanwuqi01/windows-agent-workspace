@@ -1,0 +1,6 @@
+# 渲染产物、预览图、真实业务派生文件一律不入库
+outputs/
+__pycache__/
+*.pyc
+.venv/
+venv/

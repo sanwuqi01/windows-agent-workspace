@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Cut workbench dashboard",
+    "description": "Scans the F:\\agent workspace and shows batch progress for tagging, spoken-video edits, highlights, SFX, B-roll and final merges."
+  }
+}

@@ -1,0 +1,52 @@
+{
+  "schema_version": 1,
+  "title": "demo16s 五段不等长演示",
+  "source": {
+    "transcript": "transcript.md",
+    "subtitle": "subs.srt",
+    "duration": 16.0,
+    "note": "合成演示字幕，非业务内容；五段时长 2/4/3/5/2 秒，用来验证不等长进度条"
+  },
+  "chapters": [
+    {
+      "index": 1,
+      "title": "早餐怎么吃",
+      "anchor": {
+        "start_sentence": "早餐到底该怎么吃",
+        "end_sentence": "今天一次讲清"
+      }
+    },
+    {
+      "index": 2,
+      "title": "蛋白质先吃",
+      "anchor": {
+        "start_sentence": "第一件事是蛋白质",
+        "end_sentence": "鸡蛋牛奶都算"
+      }
+    },
+    {
+      "index": 3,
+      "title": "主食粗细搭",
+      "anchor": {
+        "start_sentence": "第二步看主食",
+        "end_sentence": "别只吃白粥配咸菜"
+      }
+    },
+    {
+      "index": 4,
+      "title": "两个常见误区",
+      "anchor": {
+        "start_sentence": "误区一是空腹喝咖啡",
+        "end_sentence": "把水果当正餐"
+      }
+    },
+    {
+      "index": 5,
+      "title": "三句话记住",
+      "anchor": {
+        "start_sentence": "记住这三句",
+        "end_sentence": "早餐就不难"
+      }
+    }
+  ]
+}

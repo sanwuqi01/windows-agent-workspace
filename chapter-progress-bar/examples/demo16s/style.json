@@ -1,0 +1,23 @@
+﻿{
+  "width": 1080,
+  "height": 112,
+  "fps": 30,
+  "background": "#FFFFFF",
+  "cell": "#FFFFFF",
+  "progress": "#1E6FFF",
+  "text": "#1B1B1B",
+  "stroke": "#FFFFFF",
+  "font": {
+    "path": "C:/Windows/Fonts/msyh.ttc"
+  },
+  "font_size": 30,
+  "padding": 8,
+  "gap": 6,
+  "line_gap": 4,
+  "stroke_width": 2,
+  "corner_radius": 4,
+  "cell_border": "#D8DEE9",
+  "cell_border_width": 1,
+  "text_padding": 6,
+  "letter_spacing": 0
+}

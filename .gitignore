@@ -1,0 +1,26 @@
+# 工作区运行状态和本机配置
+.workbench/
+_backup/
+_edge_live/
+aa-docs/
+outputs/
+输出/
+任务/
+运行记录/
+管线设置/
+handoff/exports/
+tools/worker.patch.yml
+.env
+.env.*
+*credentials*.yaml
+*.pem
+*.key
+*.local.json
+__pycache__/
+.venv/
+.DS_Store
+*.mp4
+*.mov
+*.wav
+*.zip
+*.log
