@@ -5,7 +5,7 @@
 | 路径 | 职责与使用条件 |
 |---|---|
 | `chapter-progress-bar/` | DSH 从打标文案提炼五段，工具检查章节、按最终字幕对时，生成可放到剪映轨道上的 MP4。带合成示例和测试。 |
-| `cut-workbench-dashboard/` | DSH 工作台插件，读取 Windows 工作目录展示进度；目前通过标题和目录推断状态，不能作为最终草稿已验收的凭证。 |
+| `cut-workbench-dashboard/` | DSH 工作台插件，按[批次交付清单](cut-workbench-dashboard/README.md)核对单期产物，分别展示草稿已生成和人工已验收。 |
 | `kuaizi-empty-shot/` | 独立的分镜计划生成器 storyboard.mjs；调用平台的生成、下载与浏览器登录适配器保留在生产机；[现有 Edge 素材中心选页修复](kuaizi-empty-shot/edge-routing/README.md)可只读核对或重建。 |
 | `talking-head-auot-cut/` | 口播工作台本地启动入口。依赖生产机已部署的 personal-workbench 核心、模块及本机配置；导入时读取的核心版本为 09076e833427a26d2adb9ad74914bc8b0421dcaf。 |
 | `tools/dsh-worker.cmd` | 在已配置的 Windows 主机上通过 stdin 传入任务，配合同目录的 PowerShell 包装器使用。模型配置 worker.patch.yml 和凭据由主机提供。 |
