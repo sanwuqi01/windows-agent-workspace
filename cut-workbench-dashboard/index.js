@@ -4,153 +4,96 @@
  * as JSON through the webServer service; the Client half renders the panel.
  */
 import fs from 'node:fs';
+import { createHash } from 'node:crypto';
 import path from 'node:path';
 
 const ROOT = 'F:\\agent';
 
-function safeListDir(dir, depth = 1) {
-  try {
-    return fs.readdirSync(dir, { withFileTypes: true }).map((e) => ({
-      name: e.name,
-      isDir: e.isDirectory(),
-    }));
-  } catch {
-    return [];
+function list(dir, optional = false) {
+  try { return fs.readdirSync(dir, { withFileTypes: true }); }
+  catch (e) { if (optional && e.code === 'ENOENT') return []; throw e; }
+}
+
+function readJson(file) {
+  return JSON.parse(fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, ''));
+}
+
+// 文件名含扩展名，逐字匹配。主体和单期编号由交付者登记，不从标题推测。
+function loadLedger(dir, batch) {
+  let data;
+  try { data = readJson(path.join(dir, '交付清单.json')); }
+  catch (e) { return { note: e.code === 'ENOENT' ? '待登记' : '清单无法读取' }; }
+  if (data?.version !== 1 || data.batch !== batch || !Array.isArray(data.episodes))
+    return { note: '清单格式或批次不符' };
+  const entries = new Map(), ids = new Set(), conflicts = new Set();
+  for (const row of data.episodes) {
+    if (!row || ![row.subject, row.episode, row.dst].every(v => typeof v === 'string' && v.trim()))
+      return { note: '清单缺少单期身份' };
+    const id = JSON.stringify([row.subject, row.episode]);
+    if (ids.has(id)) conflicts.add(id);
+    ids.add(id);
+    entries.set(row.dst, entries.has(row.dst) ? null : { row, id });
   }
+  return { entries, conflicts };
 }
 
-function exists(p) {
-  try { fs.statSync(p); return true; } catch { return false; }
+function filePath(ref, dir) {
+  return typeof ref === 'string' && ref.trim() ? path.resolve(dir, ref) : null;
 }
-
-/** 批次目录下的视频条目（.mp4/.mov/.MP4/.MOV 文件） */
-function listBatchVideos(batchDir) {
-  return safeListDir(batchDir)
-    .filter((e) => !e.isDir && /\.(mp4|mov)$/i.test(e.name))
-    .map((e) => e.name.replace(/\.(mp4|mov)$/i, ''));
+function nonempty(ref, dir) {
+  const file = filePath(ref, dir);
+  if (!file) return false;
+  try { const stat = fs.statSync(file); return stat.isFile() && stat.size > 0; }
+  catch { return false; }
 }
-
-/** 单期七步进度推断 */
-function episodeProgress(title, ctx) {
-  const steps = [];
-  // ① 打标：打标素材批次里存在去掉 _打标 后缀的同名视频，或已经是标题名
-  const tagged = ctx.taggedVideos.some((v) => v === title || v === `${title}_打标`);
-  steps.push({ key: 'tag', label: '打标', done: tagged });
-  // ② 口播工程：kbcg 任务输出目录（edit-* 任务根下）存在包含该标题的交付目录
-  const spoken = ctx.editOutputRoots.some((root) =>
-    safeListDir(root).some((d) => d.isDir && d.name.includes(title)));
-  steps.push({ key: 'edit', label: '口播工程', done: spoken });
-  // ③ 重点词
-  const hl = ctx.highlightDirs.some((d) => d.includes(title));
-  steps.push({ key: 'hl', label: '重点词', done: hl });
-  // ④ 音效
-  const sfx = ctx.sfxDirs.some((d) => d.includes(title));
-  steps.push({ key: 'sfx', label: '音效', done: sfx });
-  // ⑤ 空镜回填（overlay 目录带 空镜版）
-  const overlay = ctx.overlayDirs.some((d) => d.includes(title));
-  steps.push({ key: 'overlay', label: '空镜回填', done: overlay });
-  // ⑥ 封面 + 空镜（空镜根目录下有该标题目录，且含 封面.png）
-  const shotDir = path.join(ctx.shotRoot, title);
-  const cover = exists(path.join(shotDir, '封面.png'));
-  const shots = safeListDir(shotDir).filter((e) => /^镜\d+\.mp4$/i.test(e.name)).length;
-  steps.push({ key: 'shot', label: '封面/空镜', done: cover && shots > 0 });
-  steps.push({ key: 'merge', label: '合并交付', done: false });
-  return { steps, cover, shots };
+function draftDigest(ref, dir, cache) {
+  const file = filePath(ref, dir);
+  if (!file || path.basename(file) !== 'draft_content.json') return null;
+  if (!cache.has(file)) {
+    let digest = null;
+    try {
+      const bytes = fs.readFileSync(file);
+      const draft = JSON.parse(bytes.toString('utf8').replace(/^\uFEFF/, ''));
+      if (draft.tracks?.some(t => t.type === 'video' && Array.isArray(t.segments) && t.segments.length))
+        digest = createHash('sha256').update(bytes).digest('hex');
+    } catch { /* 未生成、写入中或不可读：不计交付 */ }
+    cache.set(file, digest);
+  }
+  return cache.get(file);
 }
-
-function buildData() {
-  const tagRoot = path.join(ROOT, '广济医疗-医生IP-打标素材');
-  const shotRoot = path.join(ROOT, '广济医疗-医生IP-空镜');
-  const thRoot = path.join(ROOT, 'talking-head-auot-cut');
-  const tasksDir = path.join(thRoot, '任务');
-  const outputRoot = path.join(thRoot, '输出');
-  const recycleRoot = path.join(thRoot, '运行记录', '剪映草稿回收');
-
-  const batches = safeListDir(tagRoot)
-    .filter((e) => e.isDir)
-    .map((b) => {
-      const batchDir = path.join(tagRoot, b.name);
-      const taggedVideos = listBatchVideos(batchDir);
-      // 收集各包装目录名（批次级一次）
-      const subjectRoots = safeListDir(outputRoot).filter((e) => e.isDir).map((e) => e.name);
-      const highlightDirs = [];
-      const sfxDirs = [];
-      const overlayDirs = [];
-      const editOutputRoots = [];
-      for (const subject of subjectRoots) {
-        const hlRoot = path.join(outputRoot, subject, 'spoken-video-highlights');
-        for (const sub of safeListDir(hlRoot)) {
-          if (!sub.isDir) continue;
-          for (const d of safeListDir(path.join(hlRoot, sub.name))) {
-            highlightDirs.push(d.name);
-          }
-        }
-        const sfxRoot = path.join(outputRoot, subject, 'spoken-video-sfx');
-        for (const sub of safeListDir(sfxRoot)) {
-          if (!sub.isDir) continue;
-          for (const d of safeListDir(path.join(sfxRoot, sub.name))) {
-            sfxDirs.push(d.name);
-          }
-        }
-        const ovRoot = path.join(outputRoot, subject, 'spoken-video-overlay');
-        for (const sub of safeListDir(ovRoot)) {
-          if (!sub.isDir) continue;
-          for (const d of safeListDir(path.join(ovRoot, sub.name))) {
-            overlayDirs.push(d.name);
-          }
-        }
-        const kbcgRoot = path.join(outputRoot, subject, 'kbcg-pipeline-win');
-        for (const t of safeListDir(kbcgRoot)) {
-          if (t.isDir) editOutputRoots.push(path.join(kbcgRoot, t.name));
-        }
-      }
-      // 每期以打标目录中的视频标题为键
-      const episodes = taggedVideos.map((raw) => {
-        const title = raw.replace(/_打标$/, '');
-        const ctx = {
-          taggedVideos,
-          editOutputRoots,
-          highlightDirs,
-          sfxDirs,
-          overlayDirs,
-          shotRoot,
-        };
-        // 合并交付：最终草稿名 = 批次名；在回收目录之外无法直接读剪映草稿箱，这里只看回收目录是否留有中间稿
-        const p = episodeProgress(title, ctx);
-        // merge 判定：批次内所有期其他 6 步全 done 且不存在于回收目录中间稿
-        const allDone = p.steps.slice(0, 6).every((s) => s.done);
-        p.steps[6].done = allDone;
-        return { title, ...p };
-      });
-      // 任务统计
-      const tasks = safeListDir(tasksDir)
-        .filter((e) => !e.isDir && /\.md$/.test(e.name))
-        .map((e) => e.name);
-      return { name: b.name, videos: taggedVideos.length, episodes, };
+const labels = { edit: '口播工程', hl: '重点词', sfx: '音效', overlay: '空镜回填' };
+export function buildData(root = ROOT) {
+  const tagRoot = path.join(root, '广济医疗-医生IP-打标素材');
+  const th = path.join(root, 'talking-head-auot-cut');
+  const tasks = list(path.join(th, '任务'), true).filter(e => e.isFile() && /\.md$/i.test(e.name));
+  const recycled = list(path.join(th, '运行记录', '剪映草稿回收'), true).filter(e => e.isDirectory()).map(e => e.name);
+  const cache = new Map();
+  const batches = list(tagRoot).filter(e => e.isDirectory()).map(({name}) => {
+    const dir = path.join(tagRoot, name), ledger = loadLedger(dir, name);
+    const episodes = list(dir).filter(e => e.isFile() && /\.(mov|mp4)$/i.test(e.name)).map(({name: dst}) => {
+      const match = ledger.entries?.get(dst);
+      const conflict = match === null || ledger.conflicts?.has(match?.id);
+      const row = !conflict && match?.row;
+      const note = conflict ? '清单身份冲突' : row ? '' : ledger.note || '待登记';
+      const files = row?.files || {};
+      const shotFiles = Array.isArray(files.shots) ? files.shots : [];
+      const shots = new Set(shotFiles.filter(f => nonempty(f, dir)).map(f => filePath(f, dir))).size;
+      const cover = nonempty(files.cover, dir);
+      const digest = draftDigest(files.draft, dir, cache);
+      const reviewed = !!digest && row.review?.sha256 === digest && typeof row.review?.reviewer === 'string' && !!row.review.reviewer.trim();
+      const delivery = reviewed ? '已验收' : digest ? '已生成·待验收' : note || '无有效草稿';
+      const steps = [{key:'tag', label:'打标素材', done:true},
+        ...Object.entries(labels).map(([key,label]) => ({key,label,done:nonempty(files[key], dir)})),
+        {key:'shot', label:'封面/空镜', done:cover && shots > 0},
+        {key:'merge', label:'最终草稿', done:!!digest, status:delivery}];
+      return {dst, title:dst.replace(/\.(mov|mp4)$/i,'').replace(/_打标$/,''), subject:row?.subject,
+        episode:row?.episode, note, steps, shots, cover, generated:!!digest, reviewed};
     });
-
-  const shotsByTitle = {};
-  for (const ep of safeListDir(shotRoot).filter((e) => e.isDir)) {
-    const dir = path.join(shotRoot, ep.name);
-    shotsByTitle[ep.name] = {
-      cover: exists(path.join(dir, '封面.png')),
-      shots: safeListDir(dir).filter((e) => /^镜\d+\.mp4$/i.test(e.name)).length,
-    };
-  }
-
-  const recycled = safeListDir(recycleRoot).filter((e) => e.isDir).map((e) => e.name);
-  const taskFiles = safeListDir(tasksDir).filter((e) => !e.isDir && /\.md$/.test(e.name)).length;
-  const hlCount = safeListDir(tasksDir).filter((e) => /^hl-/.test(e.name)).length;
-  const sfxCount = safeListDir(tasksDir).filter((e) => /^sfx-/.test(e.name)).length;
-
-  return {
-    generatedAt: new Date().toISOString(),
-    root: ROOT,
-    batches,
-    shotsByTitle,
-    stats: { taskFiles, hlCount, sfxCount, recycledBatches: recycled.length },
-    recycled,
-  };
+    return {name, videos:episodes.length, episodes};
+  });
+  return {generatedAt:new Date().toISOString(), root, batches, recycled, stats:{taskFiles:tasks.length,
+    hlCount:tasks.filter(e => e.name.startsWith('hl-')).length, sfxCount:tasks.filter(e => e.name.startsWith('sfx-')).length,
+    recycledBatches:recycled.length}};
 }
 
 export const inject = ['webServer'];
@@ -163,7 +106,7 @@ export function apply(ctx) {
   try {
     disposer = webServer.register({
       kind: 'exact',
-      path: '/api/cut-workbench/dashboard-v2',
+      path: '/api/cut-workbench/dashboard-v3',
       handler(req, res) {
         try {
           const data = buildData();
