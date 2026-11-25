@@ -20,7 +20,7 @@ window.__ModuleLoader__.load({
     };
 
     async function loadDashboard() {
-      const res = await fetch('/api/cut-workbench/dashboard-v2');
+      const res = await fetch('/api/cut-workbench/dashboard-v3');
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       return res.json();
     }
@@ -28,7 +28,7 @@ window.__ModuleLoader__.load({
     function StepChip({ step }) {
       const done = step.done === true;
       return h('span', {
-        title: `${step.label}：${done ? '已完成' : '未完成'}`,
+        title: `${step.label}：${step.status || (done ? '已有产物' : '未确认')}`,
         style: {
           display: 'inline-flex', alignItems: 'center', gap: '5px',
           padding: '2px 9px', borderRadius: '999px',
@@ -45,7 +45,7 @@ window.__ModuleLoader__.load({
             background: done ? T.ok : T.idle,
           },
         }),
-        step.label,
+        step.status ? step.label + '：' + step.status : step.label,
       );
     }
 
@@ -70,7 +70,7 @@ window.__ModuleLoader__.load({
               fontSize: '13px', fontWeight: 500, lineHeight: '1.5',
               color: T.label1, wordBreak: 'break-word', minWidth: 0,
             },
-          }, ep.title),
+          }, ep.subject ? ep.subject + ' · ' + ep.episode + ' · ' + ep.title : ep.title),
           h('div', {
             style: {
               flex: '0 0 auto', fontSize: '11px', whiteSpace: 'nowrap',
@@ -83,12 +83,13 @@ window.__ModuleLoader__.load({
         }, ...ep.steps.map((s) => h(StepChip, { key: s.key, step: s }))),
         h('div', {
           style: { marginTop: '8px', fontSize: '11px', color: T.label2 },
-        }, `空镜 ${ep.shots} 段${ep.cover ? ' · 封面已出' : ' · 无封面'}`),
+        }, ep.note || `空镜 ${ep.shots} 段${ep.cover ? ' · 封面已出' : ' · 无封面'}`),
       );
     }
 
     function BatchCard({ batch }) {
-      const delivered = batch.episodes.filter((e) => e.steps.every((s) => s.done)).length;
+      const delivered = batch.episodes.filter(e => e.reviewed).length;
+      const generated = batch.episodes.filter(e => e.generated).length;
       const allDone = batch.episodes.length > 0 && delivered === batch.episodes.length;
       return h('div', {
         style: {
@@ -119,10 +120,10 @@ window.__ModuleLoader__.load({
               flex: '0 0 auto', fontSize: '11px', whiteSpace: 'nowrap',
               color: allDone ? T.ok : T.label2,
             },
-          }, `${delivered}/${batch.episodes.length} 期交付 · ${batch.videos} 条视频`),
+          }, `已生成 ${generated} · 已验收 ${delivered} · 共 ${batch.videos} 期`),
         ),
         ...batch.episodes.map((ep, i) =>
-          h(EpisodeRow, { key: ep.title, ep, last: i === batch.episodes.length - 1 })),
+          h(EpisodeRow, { key: ep.dst, ep, last: i === batch.episodes.length - 1 })),
       );
     }
 
