@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>就诊前，把这三件事记下来</title>
+<script src="assets/gsap.min.js"></script>
+<style>
+@font-face { font-family: "Microsoft YaHei"; src: local("Microsoft YaHei") }
+* { box-sizing: border-box }
+body { margin: 0; color: #eff9f7; font-family: "Microsoft YaHei", sans-serif }
+#visit { width: 1080px; height: 1920px; position: relative; overflow: hidden; background: #102e34 }
+main { position: absolute; inset: 320px 90px auto }
+header { color: #7be0c5; font-size: 37px; letter-spacing: 4px }
+h1 { font-size: 98px; line-height: 1.28; margin: 48px 0 94px }
+section { position: relative; margin-left: 18px; padding: 0 0 70px 68px }
+section::before { content: ''; position: absolute; left: -14px; top: 17px; width: 28px; height: 28px; border-radius: 50%; background: #7be0c5 }
+.track { position: absolute; left: 16px; width: 4px; height: 404px; background: #569e91; transform-origin: top }
+h2 { margin: 0; font-size: 52px }
+p { margin: 13px 0 0; font-size: 35px; color: #b4d2d0 }
+</style>
+</head>
+<body>
+<div id="visit" data-composition-id="visit" data-start="0" data-duration="6" data-width="1080" data-height="1920" data-fps="30">
+<main>
+<header>就诊准备</header>
+<h1>就诊前，把这<br>三件事记下来</h1>
+<div class="track"></div>
+<section><h2>什么时候开始</h2><p>记下第一次出现不适的时间</p></section>
+<section><h2>这期间有什么变化</h2><p>按先后顺序，写下自己的感受</p></section>
+<section><h2>这次最想问什么</h2><p>把最关心的问题放在第一条</p></section>
+</main>
+</div>
+<script>
+const timeline = gsap.timeline({ paused: true });
+window.__timelines = { visit: timeline };
+timeline.from('header', { opacity: 0, y: 20, duration: 0.35 }, 0)
+  .from('h1', { opacity: 0, y: 36, duration: 0.5 }, 0.18)
+  .from('.track', { scaleY: 0, duration: 2.5 }, 0.8)
+  .from('section', { opacity: 0, x: -32, stagger: 1.2, duration: 0.48 }, 0.9)
+  .to({}, { duration: 0.1 }, 5.9);
+</script>
+</body>
+</html>

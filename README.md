@@ -4,6 +4,7 @@
 
 | 路径 | 职责与使用条件 |
 |---|---|
+| [medical-motion/](medical-motion/README.md) | DSH 将一段医疗口播写成代码动效，调用 Win 11 现有 OpenMotion 输出可编辑 HTML 和剪映用无声 MP4。 |
 | `chapter-progress-bar/` | DSH 从打标文案提炼五段，工具检查章节、按最终字幕对时，生成可放到剪映轨道上的 MP4。带合成示例和测试。 |
 | `cut-workbench-dashboard/` | DSH 工作台插件，读取 Windows 工作目录展示进度；目前通过标题和目录推断状态，不能作为最终草稿已验收的凭证。 |
 | `kuaizi-empty-shot/` | 独立的分镜计划生成器 storyboard.mjs；调用平台的生成、下载与浏览器登录适配器保留在生产机。 |
