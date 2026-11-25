@@ -33,17 +33,18 @@ def generate_html(source, seconds, visual_brief=None):
         stdout=subprocess.PIPE, check=True, timeout=600,
     )
     reply = result.stdout.decode("utf-8-sig").strip()
-    html = re.fullmatch(r"(?:```(?:html)?\s*)?(<!doctype html>.*?</html>)(?:\s*```)?",
-                        reply, re.IGNORECASE | re.DOTALL)
-    if not html:
-        raise ValueError("DSH 未返回完整 HTML，未开始渲染。")
+    # The desktop worker may wrap the finished document in Markdown and append a review.
+    documents = list(re.finditer(r"<!doctype\s+html\s*>\s*<html\b[^>]*>.*?</html\s*>",
+                                 reply, re.IGNORECASE | re.DOTALL))
+    if len(documents) != 1:
+        raise ValueError("DSH 应返回一个完整 HTML 文档，未开始渲染。")
     # DSH sometimes emits either localized family name in a CSS fallback list.
     # HyperFrames verifies each name individually, even on Windows with YaHei installed.
     font_faces = """<style>
 @font-face { font-family: "Microsoft YaHei"; src: local("Microsoft YaHei") }
 @font-face { font-family: "微软雅黑"; src: local("Microsoft YaHei") }
 </style>"""
-    body, count = re.subn(r"</head\s*>", font_faces + "</head>", html[1], count=1, flags=re.IGNORECASE)
+    body, count = re.subn(r"</head\s*>", font_faces + "</head>", documents[0][0], count=1, flags=re.IGNORECASE)
     if not count:
         raise ValueError("DSH 生成的 HTML 缺少 head 结束标签")
     return body
