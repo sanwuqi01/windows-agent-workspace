@@ -13,9 +13,11 @@
 // Usage:
 //   node storyboard.mjs plan <字幕.txt|文稿.md|关键词.json> [-n 6] [--out plan.json]
 //   node storyboard.mjs plan --text "完整字幕文本" -n 6 --out plan.json
+//   node storyboard.mjs plan <完整文稿> --shots <DSH整稿计划.json> --out <筷子批次.json>
 //   node storyboard.mjs rules
 
 import fs from 'node:fs';
+import { createHash } from 'node:crypto';
 import path from 'node:path';
 
 // ---------- 强医疗词：命中即按医疗内容处理，走 3D 医学动画 ----------
@@ -38,10 +40,6 @@ const CONTEXT_TERMS = [
   '手术室', '报告', '处方', '病历', '挂号', '科室', '走廊', '授牌', '牌匾',
   '联盟', '成员单位', '生殖中心', '生殖医学', '男科', '妇科', '产科',
 ];
-
-const MEDICAL_STYLE = '3D 建模医学动画风格，柔和的医学科普渲染，半透明解剖演示质感，洁净的浅蓝米白配色，圆润低多边形建模，专业不冰冷';
-const WARM_STYLE = '温馨写实摄影质感，柔和自然光，浅景深，中国现代家庭生活场景，治愈氛围';
-const HARD_CONSTRAINTS = '画面人物必须是中国人黄皮肤面孔，不得出现欧美或其他外国人面孔；符合中国大陆内容发布规范；无文字，无logo，无水印';
 
 const VISUAL_WORDS = [
   '夫妻', '丈夫', '妻子', '医生', '主任', '护士', '孩子', '婴儿', '家庭',
@@ -146,26 +144,48 @@ function selectSentences(text, analysis, max) {
   return picked;
 }
 
-function sentenceTopic(sentence, maxLen = 60) {
-  return sentence.length > maxLen ? sentence.slice(0, maxLen) : sentence;
+// Automatic extraction supplies review candidates. DSH can provide its semantic
+// summary and concrete visual anchor with --shots before a paid batch.
+function buildPrompt(summary, style, anchor) {
+  const subject = summary.trim().replace(/[。，、！？；：,.!?;:]+$/u, '');
+  const ending = style === 'medical3d'
+    ? '生成合适的3D医学科普动画，画面里不要出现任何文字。'
+    : '生成合适的写实摄影空镜，画面里不要出现任何文字，画面里不要出现人物。';
+  return `${subject}，${anchor}。${ending}`;
 }
 
-function buildPrompt(sentence, style, keyword = '') {
-  const topic = keyword || sentenceTopic(sentence);
-  const medical = style === 'medical3d';
-  if (medical) {
-    return `${MEDICAL_STYLE}。9:16竖屏科普空镜，主题【${topic}】；原文语境【${sentenceTopic(sentence)}】。只表现这句原文中的医疗概念，不添加原文没有的疾病、治疗或疗效；画面干净专业，柔和洁净光照，不出现真实文字标注。${HARD_CONSTRAINTS}。`;
-  }
-  return `温馨写实摄影质感。9:16竖屏空镜，主题【${sentenceTopic(sentence)}】。${WARM_STYLE}。画面只表现原文中的场景与动作，不添加原文没有的信息；${HARD_CONSTRAINTS}。`;
-}
-
-function buildItemsFromSentences(rows, analysis, styleOverride) {
+function loadReviewedShots(filename, sourceText) {
+  const plan = JSON.parse(fs.readFileSync(filename, 'utf8').replace(/^\uFEFF/, ''));
+  const digest = createHash('sha256').update(sourceText.trim()).digest('hex');
+  if (plan.source_sha256 && plan.source_sha256 !== digest) throw new Error('整稿与 DSH 计划来源不一致');
+  const rows = plan.kuaizi_shots;
+  if (!Array.isArray(rows)) throw new Error('--shots 文件缺少 kuaizi_shots 数组');
   return rows.map((row, i) => {
-    const style = styleOverride || (row.strong.length > 0 ? 'medical3d' : analysis.style);
+    const { source_sentence, summary, anchor, style } = row ?? {};
+    if (typeof source_sentence !== 'string' || !source_sentence.trim() || !sourceText.includes(source_sentence)) {
+      throw new Error(`第 ${i + 1} 镜的原句没有逐字出现在输入文稿中`);
+    }
+    if (typeof summary !== 'string' || !summary.trim() || /[。！？!?；;\r\n]/u.test(summary.trim().replace(/[。！？!?]$/u, ''))) {
+      throw new Error(`第 ${i + 1} 镜需要一句完整的压缩口播`);
+    }
+    if (typeof anchor !== 'string' || !anchor.trim() || [...anchor.trim()].length > 15 ||
+        /[\p{P}\s]/u.test(anchor)) throw new Error(`第 ${i + 1} 镜需要 1–15 字的单个机制或物象锚点`);
+    if (!['medical3d', 'warmReal'].includes(style)) throw new Error(`第 ${i + 1} 镜的风格无效`);
+    return {
+      name: `镜${String(i + 1).padStart(2, '0')}`, type: 'video',
+      prompt: buildPrompt(summary, style, anchor.trim()), keyword: anchor.trim(),
+      reason: 'DSH 按完整口播选镜', style, source_sentence,
+    };
+  });
+}
+
+function buildItemsFromSentences(rows, styleOverride) {
+  return rows.map((row, i) => {
+    const style = styleOverride || (row.strong.length > 0 ? 'medical3d' : 'warmReal');
     return {
       name: `镜${String(i + 1).padStart(2, '0')}`,
       type: 'video',
-      prompt: buildPrompt(row.sentence, style, row.strong[0] || ''),
+      prompt: buildPrompt(row.sentence, style, row.strong[0] || row.visual[0] || row.sentence.slice(0, 15)),
       keyword: (row.strong[0] || row.sentence.slice(0, 12)).trim(),
       reason: `原文命中：${(row.strong.length ? row.strong : row.visual).slice(0, 4).join('、') || '可视觉化场景'}`,
       style,
@@ -181,7 +201,7 @@ function buildItemsFromKeywords(selections, analysis, styleOverride) {
     return {
       name: `镜${String(i + 1).padStart(2, '0')}`,
       type: 'video',
-      prompt: buildPrompt(sentence || sel.keyword || '医学科普空镜', style, sel.keyword || ''),
+      prompt: buildPrompt(sentence || sel.keyword || '医学科普空镜', style, (sel.keyword || sentence || '医学科普').slice(0, 15)),
       keyword: sel.keyword || '',
       reason: sel.reason || '',
       style,
@@ -197,7 +217,7 @@ function readTextInput(inputPath, inlineText) {
   if (!inputPath) throw new Error('缺少输入：传字幕/文稿路径，或用 --text 传完整文本');
   const ext = path.extname(inputPath).toLowerCase();
   if (ext === '.json') {
-    const j = JSON.parse(fs.readFileSync(inputPath, 'utf8'));
+    const j = JSON.parse(fs.readFileSync(inputPath, 'utf8').replace(/^\uFEFF/, ''));
     if (typeof j.text === 'string') return { text: j.text, source: inputPath };
     if (typeof j.transcript === 'string') return { text: j.transcript, source: inputPath };
     if (typeof j.script === 'string') return { text: j.script, source: inputPath };
@@ -219,19 +239,22 @@ function readTextInput(inputPath, inlineText) {
   return { text: fs.readFileSync(inputPath, 'utf8'), source: inputPath };
 }
 
-export function makePlan(inputPath, { max = 6, videoSecs = 5, text = '', style = 'auto' } = {}) {
+export function makePlan(inputPath, { max = 6, videoSecs = 5, text = '', style = 'auto', shotsFile = null } = {}) {
   const input = readTextInput(inputPath, text);
+  const sourceText = input.text.replace(/\r\n?/g, '\n');
   input.text = cleanInputText(input.text);
   const analysis = analyzeText(input.text);
   const styleOverride = style === 'medical3d' ? 'medical3d' : style === 'warmReal' ? 'warmReal' : null;
 
   let items;
-  if (input.selections && input.selections.length) {
+  if (shotsFile) {
+    items = loadReviewedShots(shotsFile, sourceText);
+  } else if (input.selections && input.selections.length) {
     items = buildItemsFromKeywords(input.selections, analysis, styleOverride);
   } else {
     const rows = selectSentences(input.text, analysis, max);
     if (!rows.length) throw new Error('输入文本里没有可用的句子');
-    items = buildItemsFromSentences(rows, analysis, styleOverride);
+    items = buildItemsFromSentences(rows, styleOverride);
   }
 
   const meta = {
@@ -240,6 +263,7 @@ export function makePlan(inputPath, { max = 6, videoSecs = 5, text = '', style =
     video: { resolution: '720p', aspect_ratio: '9:16', duration_sec: videoSecs },
     analysis,
     style_override: styleOverride || 'auto',
+    selection: shotsFile ? 'reviewed-shots' : 'automatic-candidates',
     item_count: items.length,
   };
   return { items, meta };
@@ -249,22 +273,17 @@ export function makePlan(inputPath, { max = 6, videoSecs = 5, text = '', style =
 if (process.argv[1] && process.argv[1].endsWith('storyboard.mjs')) {
   const [cmd, ...rest] = process.argv.slice(2);
   if (cmd === 'rules') {
-    console.log(`空镜生成规范（2026-11-11 修订）
-=====================================
-1) 先读完整字幕/文稿，不只看关键词。
-2) 医疗内容判定：命中强医疗词（无精子症/精子/精液/生育力/卵巢/子宫/激素/超声/胚胎/诊断/治疗/手术等）
-   → 3D 建模医学动画风格：${MEDICAL_STYLE}
-3) 只有“医院/医生/诊室/患者/报告”等场景词、没有强医疗词
-   → 温馨写实：${WARM_STYLE}
-4) 医疗文本从原文抽取含医疗词的原句/短语生成，不凭空编造疾病或疗效。
-5) 硬约束：${HARD_CONSTRAINTS}
-6) 输出为数组，可直接 generate.mjs batch；分析元数据写 .meta.json。
-7) 默认取 6 条；可用 -n 控制；agent 必须人工审阅后再 batch。`);
+    console.log(`先读整期文稿，选择具体的医疗机制或无人物场景。
+医疗：<原句压成一句>，<≤15字机制锚点>。生成合适的3D医学科普动画，画面里不要出现任何文字。
+写实空景：改用写实摄影空镜并要求画面里不要出现人物。
+把逐字原句、压缩句、锚点和风格放进 kuaizi_shots；plan 文稿 --shots 文件 --out 计划.json。
+普通 plan 提供候选，提交前按原稿审阅。新主题先试一条、抽帧确认，再按现有流程放量。`);
   } else if (cmd === 'plan') {
     const args = [...rest];
     let input = null;
     let max = 6;
     let out = null;
+    let shotsFile = null;
     let videoSecs = 5;
     let text = '';
     let style = 'auto';
@@ -272,6 +291,10 @@ if (process.argv[1] && process.argv[1].endsWith('storyboard.mjs')) {
     for (let i = 0; i < args.length; i++) {
       const a = args[i];
       if (a === '-n' || a === '--n' || a === '--max') max = parseInt(args[++i], 10);
+      else if (a === '--shots') {
+        shotsFile = args[++i];
+        if (!shotsFile || shotsFile.startsWith('--')) { console.error('--shots 缺少文件路径'); process.exit(1); }
+      }
       else if (a === '--out') out = args[++i];
       else if (a === '--video-secs') videoSecs = parseInt(args[++i], 10);
       else if (a === '--text') text = args[++i] || '';
@@ -286,7 +309,7 @@ if (process.argv[1] && process.argv[1].endsWith('storyboard.mjs')) {
     if (max > 12) max = 12;
 
     try {
-      const { items, meta } = makePlan(input, { max, videoSecs, text, style });
+      const { items, meta } = makePlan(input, { max, videoSecs, text, style, shotsFile });
       const outFile = out || (input ? input.replace(/\.(json|txt|md)$/i, '') + '.storyboard-plan.json' : 'storyboard-plan.json');
       fs.writeFileSync(outFile, JSON.stringify(items, null, 2), 'utf8');
       fs.writeFileSync(outFile.replace(/\.json$/i, '') + '.meta.json', JSON.stringify(meta, null, 2), 'utf8');

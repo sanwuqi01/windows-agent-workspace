@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { access, copyFile, mkdir, mkdtemp, readFile, rename, rm, rmdir } from 'node:fs/promises';
+import { access, copyFile, mkdir, mkdtemp, readFile, rename, rm } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { existsSync } from 'node:fs';
@@ -20,7 +20,7 @@ async function main([input, target, seconds, ...extra]) {
   const overrides = { ...process.env };
   await native.configureNativeEnvironment(state.appRoot);
   for (const [key, [base, relative]] of Object.entries(alternatives)) {
-    if (existsSync(process.env[key])) continue;
+    if (process.env[key] && existsSync(process.env[key])) continue;
     const fallback = base && path.join(base, relative);
     if (overrides[key] || !fallback || !existsSync(fallback)) throw new Error('缺少可执行文件，请设置 ' + key);
     process.env[key] = fallback;
@@ -30,13 +30,21 @@ async function main([input, target, seconds, ...extra]) {
   const { runHyperframes, snapshotExportExpectation } = await appModule('hyperframes.ts');
   const output = path.resolve(target);
   await mkdir(path.dirname(output), { recursive: true });
-  // Reserve a fresh directory. Concurrent runs cannot overwrite a previous shot.
-  await mkdir(output);
-  const stage = await mkdtemp(path.join(output, '.render-'));
+  // An interrupted render can reuse its saved project, but a finished movie is immutable.
+  if (existsSync(output)) {
+    if (!existsSync(path.join(output, 'project', 'index.html')) || existsSync(path.join(output, 'motion.mp4')))
+      throw new Error('输出目录已存在，且不是可续渲染的失败镜头');
+  } else {
+    await mkdir(output);
+  }
+  const lock = path.join(output, '.render-lock');
+  await mkdir(lock);
+  let stage;
   try {
+    stage = await mkdtemp(path.join(output, '.render-'));
     const project = path.join(output, 'project');
     await mkdir(path.join(project, 'assets'), { recursive: true });
-    await copyFile(html, path.join(project, 'index.html'));
+    if (html !== path.join(project, 'index.html')) await copyFile(html, path.join(project, 'index.html'));
     await copyFile(path.join(state.appRoot, 'node_modules/gsap/dist/gsap.min.js'), path.join(project, 'assets/gsap.min.js'));
     const expected = await snapshotExportExpectation(state.appRoot, project);
     if (seconds && (expected.duration !== Number(seconds) || expected.width !== 1080 ||
@@ -59,9 +67,8 @@ async function main([input, target, seconds, ...extra]) {
     await rename(movie, path.join(output, 'motion.mp4'));
     console.log(path.join(output, 'motion.mp4'));
   } finally {
-    await rm(stage, { force: true, recursive: true, maxRetries: 6, retryDelay: 400 }).catch(error => console.error(error.message));
-    // Remove our empty reservation after an error, preserving any published files.
-    await rmdir(output).catch(() => {});
+    if (stage) await rm(stage, { force: true, recursive: true, maxRetries: 6, retryDelay: 400 }).catch(error => console.error(error.message));
+    await rm(lock, { force: true, recursive: true });
   }
 }
 main(process.argv.slice(2)).catch(error => { console.error(error.message); process.exitCode = 1; });

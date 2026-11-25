@@ -1,8 +1,26 @@
 # 医疗口播代码动效
 
-从已定稿的 UTF-8 口播文案里取一个适合用图形解释的片段，例如一次时间变化或一组步骤。DSH 为这段话编写 HTML、SVG/CSS 和 GSAP 时间线，Win 11 本机的 OpenMotion 将它渲染成一条全画幅无声 MP4，可作为剪映中的插入镜头。默认竖屏 1080×1920、30 fps、6 秒。
+DSH 阅读整期已定稿 UTF-8 口播正文，按语义挑选确实适合代码动效的段落，可为零个。每镜保留可定位的连续原文、字符区间和具体视觉说明，再编写 HTML、SVG/CSS 和 GSAP 时间线，Win 11 本机的 OpenMotion 将其渲染为全画幅无声 MP4，供剪映插入。默认竖屏 1080×1920、30 fps。
 
-在本模块目录运行。每次给一个新的输出目录。
+## 整稿入口
+
+在本模块目录运行。`outputs` 为 Git 忽略的工作区产物目录；真实文案放在仓库外。
+
+```bat
+plan.cmd C:\work\final-script.txt outputs\episode-01
+plan.cmd C:\work\final-script.txt outputs\episode-02 --plan-only --mixed
+plan.cmd C:\work\final-script.txt outputs\episode-02 --resume
+```
+
+首次运行保存 `storyboard.json`，并在默认模式下依次生成 `code-01\motion.mp4` 等镜头。`--plan-only` 仅规划，`--resume` 使用既有计划继续；逐镜跳过方案未变的已完成 MP4，重用已生成 HTML，失败的渲染可在原目录重试。每镜的 `code-XX.request.json` 记录原文、位置、视觉说明与时长；若这些字段改动，旧 HTML/MP4 不再复用，应开新输出目录。正文改动后也需重新规划。空的 `code_shots` 是有效结果，不会生成 MP4。
+
+`storyboard.json` 固定含 `schema_version: 1`、`source_sha256`、`mixed`、`code_shots`、`kuaizi_shots`。代码镜头项为 `{id, source_quote, start, end, visual_brief, seconds}`；筷子候选项为 `{source_sentence, summary, anchor, style, start, end}`。`start` 和 `end` 是从去掉整稿首尾空白后的正文计算的 Python 字符偏移，`end` 不包含在区间中。所有引文必须唯一定位，镜头区间互不重叠。`--mixed` 只让 DSH 额外规划适合 3D 医疗或温暖写实画面的 AI 空镜候选，可为零条；不会调用筷子或渲染 AI 空镜。`summary` 是忠实压缩句，末尾标点自动去除，小数点保留；`anchor` 是 1–15 字、不含标点的单一可视机制或物象，`style` 仅 `medical3d` / `warmReal`。
+
+逐镜检查计划、屏幕文字、图形关系和原文，再按最终口播的起止点放入剪映工程。3D AI 空镜继续沿用原有筷子生产流程。
+
+## 单镜入口
+
+原有单镜入口仍可单独使用，每次给一个新的输出目录。
 
 ```bat
 generate.cmd examples\excerpt.txt outputs\visit-01 --seconds 6
